@@ -19,20 +19,33 @@ import (
 	"net/http"
 
 	"log"
+
+	"github.com/skythen/bertlv"
 )
 
+//
 // Constants
+//
 const CHUB_INFO_LOOKUP_API_URL = "https://qa.api.fiservapps.com/ch/payments-vas/v1/accounts/information-lookup"
 const SYSTEM_MERCHANT_ID = "100009000000441"
 const SYSTEM_TERMINAL_ID = "10000002"
 
 // JTE TODO - put these in Environment for security purposes
-const key = "lq6sRHxltHk4PkB4myfSGalRzK9kvcir"
-const secret = "vZ9UUZ5gtzUPlbia8BgC2G6qzDJGmli38G1osZjJPDz"
+const key = "Kj4HzMB3B3AO352PpNyQTIafT30BB371"
+const secret = "HmhExt7QBeDUCQiDBc72XGD3t5Nx7nNZy46mcPUqxUK"
 
+//
+// Types
+//
 // The following structure is the request payload for this service's /decrypt endpoint
 type DecryptRequest struct {
 	PaymentCardData string `json:"paymentCardData" validate:"required"`
+}
+
+// The following structure is the response for this service's /decrypy endpoint
+type DecryptResponse struct {
+	EMVData     string             `json:"emvData" validate:"required"`
+	ÇardDetails []CardDetailsBlock `json:"cardDetails" validate:"required"`
 }
 
 // The following structures are related to the response from Apple's TTP /translate endpoint
@@ -100,8 +113,12 @@ type CardDetailsBlock struct {
 }
 
 type CardInfoResponse struct {
-	CardDetailsBlock CardDetailsBlock `json:"cardDetails" validate:"required"`
+	CardDetailsBlock []CardDetailsBlock `json:"cardDetails" validate:"required"`
 }
+
+//
+// HTTP Handlers
+//
 
 // POST /decrypt handler
 func decryptTTPBLob(w http.ResponseWriter, r *http.Request) {
@@ -135,13 +152,19 @@ func decryptTTPBLob(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(cardInfoResponse)
 
 	if err == nil {
-		w.Write([]byte("{\"tlvs\":\"" + plainText + "\"}"))
+		// Setup response entity
+		decryptResponse := DecryptResponse{
+			EMVData:     plainText,
+			ÇardDetails: cardInfoResponse.CardDetailsBlock,
+		}
+		json.NewEncoder(w).Encode(decryptResponse)
 		// Implicitly returns status 200
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 	}
 }
 
+// Compose the API signature for a given API key+secret, body, time and clientRequestId
 func getSignature(key string, secret string, data string, time int64, clientRequestId int) string {
 
 	rawSignature := key + fmt.Sprint(clientRequestId) + fmt.Sprint(time) + data
@@ -158,12 +181,13 @@ func getSignature(key string, secret string, data string, time int64, clientRequ
 	return sha
 }
 
+// Invoke the CommerceHub information-lookup endpoint for a card with the given PAN and expdate
 func doBINLookup(PAN string, expMonth string, expYear string) (CardInfoResponse, error) {
 
 	// The return value
 	var cardInfoResponse CardInfoResponse
 
-	// Setup the request to the info-lookup
+	// Setup the request to the info-lookup call
 	cardBlock := CardBlock{
 		CardData:        PAN,
 		ExpirationMonth: expMonth,
@@ -188,7 +212,9 @@ func doBINLookup(PAN string, expMonth string, expYear string) (CardInfoResponse,
 	// Convert JSON request object to bytes
 	body, _ := json.Marshal(cardInfoRequest)
 
-	// Setup headers to call CommerceHub
+	// bodyString := string(body)
+
+	// Setup headers to call CommerceHub endpoint
 	time := time.Now().UnixNano() / int64(time.Millisecond)
 
 	// Generate a nice random number (seeded w/current time) for idempotency check
@@ -211,25 +237,22 @@ func doBINLookup(PAN string, expMonth string, expYear string) (CardInfoResponse,
 	client := &http.Client{}
 	resp, err := client.Do(req)
 
-	var respBody []byte
 	if err != nil || (resp.StatusCode != 201 && resp.StatusCode != 200) {
 		// handle error
 		log.Println("Error invoking information-lookup endpoint:", resp.StatusCode)
 		defer resp.Body.Close()
-		respBody, _ = ioutil.ReadAll(resp.Body)
+		respBody, _ := ioutil.ReadAll(resp.Body)
 		log.Print(string(respBody))
+		return cardInfoResponse, err
 	} else {
 		defer resp.Body.Close()
-		respBody, _ = ioutil.ReadAll(resp.Body)
+		respBody, _ := ioutil.ReadAll(resp.Body)
 		log.Print(string(respBody))
 
-		// jsonResp := gjson.Parse(string(body))
+		// Unmarshal the response data into a CardInfoResponse instance
+		json.Unmarshal(respBody, &cardInfoResponse)
+		return cardInfoResponse, nil
 	}
-
-	// Unmarshal the response data into a CardInfoResponse instance
-	json.Unmarshal(respBody, &cardInfoResponse)
-
-	return cardInfoResponse, nil
 }
 
 // GET / handler (healthcheck)
