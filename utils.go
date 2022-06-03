@@ -124,13 +124,13 @@ func doBINLookup(PAN string, expMonth string, expYear string) (CardInfoResponse,
 
 // Extracts the PAN and expdate from the supplied EMV data string
 // i.e. parses EMV tag 57
-func getPANInfoFromEMVData(emvData string) (PAN, expMonth, expYear string, err error) {
+func getPANInfoFromEMVData(emvData []byte) (PAN, expMonth, expYear string, err error) {
 
 	// Return values
 	// var rPAN, rexpMonth, rexpYear string
 
 	// Decode the EMV data into array of TLV structs
-	tlvBytes, _ := hex.DecodeString(emvData)
+	tlvBytes, _ := hex.DecodeString(string(emvData))
 	bertlvs, err := bertlv.Parse(tlvBytes)
 
 	if err != nil {
@@ -139,7 +139,7 @@ func getPANInfoFromEMVData(emvData string) (PAN, expMonth, expYear string, err e
 
 	// Attempt to find Tag 57 (which contains PAN, expdate)
 	tag57 := bertlvs.FindFirstWithTag(bertlv.NewOneByteTag(byte(0x57)))
-	log.Print(tag57)
+	// log.Print(tag57)
 
 	if tag57 == nil {
 		return "", "", "", errors.New("Tag 57 was not found")
@@ -161,6 +161,43 @@ func getPANInfoFromEMVData(emvData string) (PAN, expMonth, expYear string, err e
 	return
 }
 
+// Mask the PAN in Tag57 in the supplied TLV byte array
+// Returns the entire TLV array encoded as hex string
+func MaskPanTag57(emvData []byte) (string, error) {
+
+	// Decode the EMV data into array of TLV structs
+	tlvBytes, _ := hex.DecodeString(string(emvData))
+	bertlvs, err := bertlv.Parse(tlvBytes)
+
+	if err != nil {
+		return "", err
+	}
+
+	// Attempt to find Tag 57 (which contains PAN, expdate)
+	tag57 := bertlvs.FindFirstWithTag(bertlv.NewOneByteTag(byte(0x57)))
+	// log.Print(tag57)
+
+	if tag57 == nil {
+		return "", errors.New("Could not find Tag 57")
+	}
+
+	// Perform the actual masking here
+	//TODO JTE is there a way to assign to a range of the slice? tag57.value[3:6] = 0x00\0x00\0x00
+	for i := 3; i < 6; i++ {
+		tag57.Value[i] = byte(0x00)
+	}
+
+	// Update the tlvs with this new value of Tag57
+	var updatedTags bertlv.BerTLVs
+	updatedTags = append(updatedTags, *tag57)
+	for _, tlv := range bertlvs {
+		if !bytes.Equal(tlv.Tag, bertlv.NewOneByteTag(byte(0x57))) {
+			updatedTags = append(updatedTags, tlv)
+		}
+
+	}
+	return strings.ToUpper(hex.EncodeToString(updatedTags.Bytes())), nil
+}
 
 // Returns the decryption key (KBEK) from the provided KBPK and TR-31 key block
 func GetDecryptionKeyFromKeyblock(KBPK []byte, tr31KeyblockString string) (cipher.Block, error) {
@@ -217,3 +254,24 @@ func DecryptTTPCipherText(KBEK cipher.Block, ivString string, cipherTextString s
 
 	return dst, nil
 }
+
+// Decodes the supplied string of hex digits into bytes and then formats as EMV TLV tags
+func dumpTLV(tlvString string) error {
+
+	tlvBytes, _ := hex.DecodeString(tlvString)
+	bertlvs, err := bertlv.Parse(tlvBytes)
+
+	if err != nil {
+		return err
+	}
+
+	for _, tlv := range bertlvs {
+		fmt.Printf("%X %X\n", tlv.Tag, tlv.Value)
+	}
+
+	return nil
+}
+
+/*
+[57134761739001010119D22122011143804400000F 82022000 8407A0000000031010 95050000000000 9A03210916 9C0100 5F2A020840 5F340101 9F0206000000003240 9F0306000000000000 9F100706010A03A00000 9F1A020840 9F1E086365613935633065 9F2608B0AAC2EA6FD42409 9F270180 9F34033F0000 9F350121 9F36020433 9F37049EEC7756 9F6E0420700080]
+*/

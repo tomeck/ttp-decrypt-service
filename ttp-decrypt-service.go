@@ -81,7 +81,11 @@ func decryptTTPBLob(w http.ResponseWriter, r *http.Request) {
 	decryptResponse := DecryptResponse{}
 
 	// Extract the PAN and expdate from the decrypted EMV data
-	PAN, expMonth, expYear, err := getPANInfoFromEMVData(string(emvData))
+	PAN, expMonth, expYear, err := getPANInfoFromEMVData(emvData)
+
+	//TODO JTE WARNING - I'm hardcoding the PAN here b/c the PAN in the Apple Payload is not found
+	fmt.Println("WARNING: USING HARDCODED PAN FOR BIN LOOKUP")
+	PAN = "42888800000001"
 
 	if err == nil {
 		// Get BIN info for this card
@@ -102,13 +106,14 @@ func decryptTTPBLob(w http.ResponseWriter, r *http.Request) {
 	// ************* ************* *************
 	// RE_ENCRYPT    PAN           HERE
 	// ************* ************* *************
-	reencryptedPan := PAN
+	reencryptedPan := PAN // TODO JTE just a placeholder
 	decryptResponse.EncryptedPAN = reencryptedPan
 
 	// ************* ************* *************
 	// MASK          PAN           HERE
 	// ************* ************* *************
-	decryptResponse.EMVData = string(emvData)
+	decryptResponse.EMVData, _ = MaskPanTag57(emvData)
+	// dumpTLV(decryptResponse.EMVData)
 
 	// HTTP response
 	if decryptErr == nil {
