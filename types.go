@@ -2,6 +2,7 @@ package main
 
 // The following structure is the request payload for this service's /decrypt endpoint
 type DecryptRequest struct {
+	RecryptKey      string `json:"recryptKey" validate:"required"`
 	PaymentCardData string `json:"paymentCardData" validate:"required"`
 }
 

@@ -41,8 +41,8 @@ func decryptTTPBLob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//TODO JTE not sure why I have to manually check these, when I marked them required in the struct
-	if reqData.PaymentCardData == "" {
-		http.Error(w, "{'error':'You must provide paymentCardData'}", http.StatusBadRequest)
+	if reqData.PaymentCardData == "" || reqData.RecryptKey == "" {
+		http.Error(w, "{'error':'You must provide paymentCardData and recryptKey'}", http.StatusBadRequest)
 		return
 	}
 
