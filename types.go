@@ -2,14 +2,16 @@ package main
 
 // The following structure is the request payload for this service's /decrypt endpoint
 type DecryptRequest struct {
+	Mid             string `json:"mid" validate:"required"`
 	RecryptKey      string `json:"recryptKey" validate:"required"`
 	PaymentCardData string `json:"paymentCardData" validate:"required"`
 }
 
 // The following structure is the response for this service's /decrypy endpoint
 type DecryptResponse struct {
-	EMVData     string             `json:"emvData" validate:"required"`
-	ÇardDetails []CardDetailsBlock `json:"cardDetails" validate:"required"`
+	EMVData      string             `json:"emvData" validate:"required"`
+	EncryptedPAN string             `json:"encryptedPAN" validate:"required"`
+	ÇardDetails  []CardDetailsBlock `json:"cardDetails" validate:"required"`
 }
 
 // The following structures are related to the response from Apple's TTP /translate endpoint

@@ -21,6 +21,10 @@ import (
 	"log"
 
 	"github.com/skythen/bertlv"
+
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/binary"
 )
 
 // Compose the API signature for a given API key+secret, body, time and clientRequestId
@@ -83,7 +87,7 @@ func doBINLookup(PAN string, expMonth string, expYear string) (CardInfoResponse,
 	signature := getSignature(key, secret, string(body), time, clientRequestId)
 
 	// Invoke the CommerceHub POST information-lookup endpoint
-	req, err := http.NewRequest("POST", CHUB_INFO_LOOKUP_API_URL, bytes.NewBuffer(body))
+	req, _ := http.NewRequest("POST", CHUB_INFO_LOOKUP_API_URL, bytes.NewBuffer(body))
 	req.Header.Add("Accept", "application/json")
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Accept-language", "en")
@@ -102,6 +106,10 @@ func doBINLookup(PAN string, expMonth string, expYear string) (CardInfoResponse,
 		defer resp.Body.Close()
 		respBody, _ := ioutil.ReadAll(resp.Body)
 		log.Print(string(respBody))
+
+		if err == nil {
+			err = fmt.Errorf("error performing BIN lookup, status=%d", resp.StatusCode)
+		}
 		return cardInfoResponse, err
 	} else {
 		defer resp.Body.Close()
@@ -141,15 +149,71 @@ func getPANInfoFromEMVData(emvData string) (PAN, expMonth, expYear string, err e
 	//  from start of string to 'D' delimiter = PAN
 	//  following two chars = YY
 	//  following two chars = MM
-	// tag57bytes, err := hex.DecodeString(tag57.Value)
 	//TODO JTE need to check bounds and whether the format of Tag57 is valid
 	sTag57 := fmt.Sprintf("%X", tag57.Value)
-	splits := strings.SplitAfter(sTag57, "D")
+	splits := strings.Split(sTag57, "D")
+
+	// Set return values
 	PAN = splits[0]
 	expYear = "20" + splits[1][0:2] // <----- WARNING: I'm artificially converting YY to YYYY
 	expMonth = splits[1][2:4]
 
-	// return "370348394121029", "12", "2024", nil
-	// return rPAN, rexpMonth, rexpYear, nil
 	return
+}
+
+
+// Returns the decryption key (KBEK) from the provided KBPK and TR-31 key block
+func GetDecryptionKeyFromKeyblock(KBPK []byte, tr31KeyblockString string) (cipher.Block, error) {
+
+	// Derive KBEK and KBAK from KBPK
+	KBEKbytes, _, err := DeriveKeyblockKeys(KBPK)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a decrypter based on the KBEK
+	KBEK, err := aes.NewCipher(KBEKbytes)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract the IV and encrypted key from the TR-31 key block
+	keyBlockIv := ivFromTR31KeyBlock(tr31KeyblockString)
+	encryptedKeyBytes := encryptedKeyFromTR31KeyBlock(tr31KeyblockString)
+
+	// Decrypt (in-place) the key using the extracted IV and the derived KBEK
+	cbc := cipher.NewCBCDecrypter(KBEK, keyBlockIv)
+	cbc.CryptBlocks(encryptedKeyBytes, encryptedKeyBytes)
+
+	// At this point, encryptedKeyBytes contains:
+	//  2 bytes of length
+	// 16 bytes of decrypted key
+	// 14 bytes of padding
+
+	length := binary.BigEndian.Uint16(encryptedKeyBytes[0:2])
+	fmt.Println("Key length is", length)
+
+	// Convert the decrypted key bytes into the one-time use decryption key
+	oneTimeKeyBytes := encryptedKeyBytes[2 : length/8+2] // skip the length bytes and padding
+	oneTimeKey, err := aes.NewCipher(oneTimeKeyBytes)
+
+	return oneTimeKey, err
+}
+
+func DecryptTTPCipherText(KBEK cipher.Block, ivString string, cipherTextString string) ([]byte, error) {
+
+	// Load the supplied cipherText IV that was in the TTP blob
+	cipherTextIV, _ := b64.StdEncoding.DecodeString(ivString)
+
+	// Load the supplied cipherText that was in the TTP blob
+	cipherTextBytes, _ := b64.StdEncoding.DecodeString(cipherTextString)
+
+	// Create a decrypter using the one-time key and ciphertext IV
+	cbc2 := cipher.NewCBCDecrypter(KBEK, cipherTextIV)
+	cbc2.CryptBlocks(cipherTextBytes, cipherTextBytes)
+
+	dst := make([]byte, hex.EncodedLen(len(cipherTextBytes)))
+	hex.Encode(dst, cipherTextBytes)
+
+	return dst, nil
 }

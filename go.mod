@@ -7,4 +7,7 @@ require (
 	github.com/skythen/bertlv v0.1.2
 )
 
-require github.com/pkg/errors v0.9.1 // indirect
+require (
+	github.com/andreburgaud/crypt2go v1.0.0
+	github.com/pkg/errors v0.9.1 // indirect
+)
